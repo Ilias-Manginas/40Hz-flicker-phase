@@ -10,4 +10,7 @@ RUN pip install \
     jupyterlab \
     mne \
     nibabel \
-    nilearn
+    nilearn \
+    pycircstat2 \
+    ffmpeg \
+    pycircstat2

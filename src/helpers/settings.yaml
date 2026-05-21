@@ -1,0 +1,81 @@
+
+
+# Created on Tue Mar 12 12:39:57 2019
+# @author: sigbjornmne
+
+proj_name:        'iliasgdk_thesis'
+
+#vars/lists
+fs:               2000
+n_events:         7
+n_trials:         10
+n_subjects:       12
+n_comforts:       5
+#event_id_list:    [1, 2, 3, 4, 5, 6, 7]
+#subset for testing
+event_id_list:    [4]
+event_name_list:  ['2.8', '16.7', '33.3', '50.0', '66.7', '83.3', '97.2']
+comfort_id_list:  [1, 2, 3, 4, 5]
+#subject_idx_list: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+# subset for testing
+subject_idx_list: [0, 1]
+
+#paths
+proj_dir:         '.'
+temp_dir:         '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/temp'
+raw_dir:          '/media/elias/Personal Data/Documents/masters/Thesis/data/raw'
+scratch_dir:      '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch'
+atlas_dir:        '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/atlas'
+comfort_dir:      '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/comfort'
+events_dir:       '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/events'
+fs_subjects_dir:  '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/fs_subjects_dir'
+fwd_dir:          '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/fwd'
+harm_dir:         '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/harm'
+morph_dir:        '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/morph'
+sn_subjects_dir:  '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/sn_subjects_dir'
+stc_dir:          '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/stc/subjects'
+trans_dir:        '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/trans'
+volume_dir:       '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/volume'
+raw_subset_dir:   '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/raw_subset'
+raw_filtered_dir: '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/raw_filtered'
+scripts_dir:      '/media/elias/Personal Data/Documents/masters/Thesis/data/scritps'
+sensor_dir:       '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/sensor' 
+epochs_dir:       '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/epochs'
+hilbert_dir:       '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/hilbert'
+
+
+subject_nr_list:  ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9', 's10', 's11', 's12']
+
+                  
+subject_id_list:  ['0005_3SJ', '0002_TCZ', '0009_YGZ', '0010_ZMG', '0011_MEE',
+                  '0012_C3Z', '0014_TAG', '0015_QKW', '0016_XLZ', '0017_QJ5',
+                  '0018_5T3', '0019_COG']
+
+raw_path1_list:   ['0005/20180514_000000/MEG/001.flicker/files/flicker.fif', 
+                  '0002/20180522_000000/MEG/001.s2/files/s2.fif', 
+                  '0009/20180522_000000/MEG/001.s3p1/files/s3p1.fif', 
+                  '0010/20180523_000000/MEG/001.s4/files/s4.fif', 
+                  '0011/20180524_000000/MEG/001.s5/files/s5.fif', 
+                  '0012/20180524_000000/MEG/001.s6/files/s6.fif', 
+                  '0014/20180525_000000/MEG/001.s7/files/s7.fif', 
+                  '0015/20180525_000000/MEG/001.s8/files/s8.fif', 
+                  '0016/20180525_000000/MEG/001.s9p1/files/s9p1.fif', 
+                  '0017/20180530_000000/MEG/001.s10/files/s10.fif',
+                  '0018/20180530_000000/MEG/001.s11/files/s11.fif', 
+                  '0019/20180530_000000/MEG/001.s12/files/s12.fif']
+
+raw_path2_list:   ['', 
+                  '', 
+                  '0009/20180522_000000/MEG/002.s3p2/files/s3p2.fif', 
+                  '', 
+                  '', 
+                  '', 
+                  '', 
+                  '', 
+                  '0016/20180525_000000/MEG/002.s9p2/files/s9p2.fif', 
+                  '', 
+                  '', 
+                  '']
+
+bads:             ['MEG1143']
+# Possibly bad : 'MEG0121'
