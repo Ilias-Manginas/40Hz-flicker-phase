@@ -11,14 +11,14 @@ n_events:         7
 n_trials:         10
 n_subjects:       12
 n_comforts:       5
-#event_id_list:    [1, 2, 3, 4, 5, 6, 7]
+event_id_list:    [1, 2, 3, 4, 5, 6, 7]
 #subset for testing
-event_id_list:    [4]
+#event_id_list:    [4]
 event_name_list:  ['2.8', '16.7', '33.3', '50.0', '66.7', '83.3', '97.2']
 comfort_id_list:  [1, 2, 3, 4, 5]
-#subject_idx_list: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+subject_idx_list: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 # subset for testing
-subject_idx_list: [0, 1]
+#subject_idx_list: [0, 1]
 
 #paths
 proj_dir:         '.'
@@ -33,15 +33,19 @@ fwd_dir:          '/media/elias/Personal Data/Documents/masters/Thesis/data/scra
 harm_dir:         '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/harm'
 morph_dir:        '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/morph'
 sn_subjects_dir:  '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/sn_subjects_dir'
-stc_dir:          '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/stc/subjects'
 trans_dir:        '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/trans'
 volume_dir:       '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/volume'
 raw_subset_dir:   '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/raw_subset'
 raw_filtered_dir: '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/raw_filtered'
 scripts_dir:      '/media/elias/Personal Data/Documents/masters/Thesis/data/scritps'
-sensor_dir:       '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/sensor' 
-epochs_dir:       '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/epochs'
-hilbert_dir:       '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/hilbert'
+sensor_dir:       '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/sensor'
+
+#Intermediate files
+epochs_dir:       '/home/elias/Documents/thesis_intermediate/data/scratch/epochs'
+hilbert_dir:      '/home/elias/Documents/thesis_intermediate/data/scratch/hilbert'
+hilbert_ref_dir:  '/home/elias/Documents/thesis_intermediate/data/scratch/hilbert_reference'
+stc_dir:          '/home/elias/Documents/thesis_intermediate/data/scratch/stc/subjects'
+results_dir:          '/home/elias/Documents/thesis_intermediate/data/scratch/results'
 
 
 subject_nr_list:  ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9', 's10', 's11', 's12']
@@ -79,3 +83,5 @@ raw_path2_list:   ['',
 
 bads:             ['MEG1143']
 # Possibly bad : 'MEG0121'
+
+retina_channels: ['EMG001', 'EMG002']

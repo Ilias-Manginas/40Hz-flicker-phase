@@ -13,4 +13,6 @@ RUN pip install \
     nilearn \
     pycircstat2 \
     ffmpeg \
-    pycircstat2
+    pycircstat2 \
+    h5io \
+    dipy

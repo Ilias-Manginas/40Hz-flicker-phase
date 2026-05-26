@@ -9,14 +9,13 @@ Created on Thu Jan 17 12:40:43 2019
 import yaml
 import mne
 import os.path as op
-import helpers.helper_functions
 
 
 def settings_dict(*yaml_fname):
     
 
     if not yaml_fname:
-        yaml_fname = 'helpers/settings.yaml'
+        yaml_fname = '/home/elias/Workspace/thesis/iliasgdk_thesis/src/helpers/settings.yaml'
 
     
     with open(yaml_fname, 'r') as f:
@@ -83,7 +82,7 @@ def load_raw_filtered(subject, preload=True):
     raw_fname = op.join(ss['raw_filtered_dir'], subject + "-raw.fif")
     raw = mne.io.read_raw_fif(raw_fname, preload=preload)  # raw meg data
 
-    # raw.info['bads'] = ss['bads']
+    raw.info['bads'] = ss['bads']
     # raw.set_channel_types(mapping={'EMG001': 'eeg'})
     # raw.set_channel_types(mapping={'EMG002': 'eeg'})
     # raw.set_channel_types(mapping={'EOG003': 'eeg'})
@@ -91,6 +90,15 @@ def load_raw_filtered(subject, preload=True):
     # raw.set_channel_types(mapping={'EMG005': 'eeg'})
     # raw.set_channel_types(mapping={'MISC001': 'misc'})
     return raw
+
+def load_fwd_model(subject):
+    ss = settings_dict()
+    fwd_fname = op.join(ss['fwd_dir'], subject + '-fwd.fif')
+    fwd = mne.read_forward_solution(fwd_fname)
+    # some of the forward models have the wrong subject name
+    if fwd['src'][0]['subject_his_id'].startswith("fs"):
+        fwd['src'][0]['subject_his_id'] = subject
+    return fwd
 
 
 def load_raw_subset_list():
