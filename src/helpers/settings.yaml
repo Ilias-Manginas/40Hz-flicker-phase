@@ -45,7 +45,8 @@ epochs_dir:       '/home/elias/Documents/thesis_intermediate/data/scratch/epochs
 hilbert_dir:      '/home/elias/Documents/thesis_intermediate/data/scratch/hilbert'
 hilbert_ref_dir:  '/home/elias/Documents/thesis_intermediate/data/scratch/hilbert_reference'
 stc_dir:          '/home/elias/Documents/thesis_intermediate/data/scratch/stc/subjects'
-results_dir:          '/home/elias/Documents/thesis_intermediate/data/scratch/results'
+stc_unaveraged_dir: '/home/elias/Documents/thesis_intermediate/data/scratch/stc_unaveraged/subjects'
+results_dir:         '/home/elias/Documents/thesis_intermediate/data/scratch/results'
 
 
 subject_nr_list:  ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9', 's10', 's11', 's12']
