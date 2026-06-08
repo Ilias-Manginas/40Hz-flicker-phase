@@ -17,35 +17,36 @@ event_id_list:    [1, 2, 3, 4, 5, 6, 7]
 event_name_list:  ['2.8', '16.7', '33.3', '50.0', '66.7', '83.3', '97.2']
 comfort_id_list:  [1, 2, 3, 4, 5]
 subject_idx_list: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+#subject_idx_list: [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11] # remove 8 for now
 # subset for testing
 #subject_idx_list: [0, 1]
 
 #paths
 proj_dir:         '.'
-temp_dir:         '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/temp'
-raw_dir:          '/media/elias/Personal Data/Documents/masters/Thesis/data/raw'
-scratch_dir:      '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch'
-atlas_dir:        '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/atlas'
-comfort_dir:      '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/comfort'
-events_dir:       '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/events'
-fs_subjects_dir:  '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/fs_subjects_dir'
-fwd_dir:          '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/fwd'
-harm_dir:         '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/harm'
-morph_dir:        '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/morph'
-sn_subjects_dir:  '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/sn_subjects_dir'
-trans_dir:        '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/trans'
-volume_dir:       '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/volume'
-raw_subset_dir:   '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/raw_subset'
-raw_filtered_dir: '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/raw_filtered'
-scripts_dir:      '/media/elias/Personal Data/Documents/masters/Thesis/data/scritps'
-sensor_dir:       '/media/elias/Personal Data/Documents/masters/Thesis/data/scratch/sensor'
+temp_dir:         '/media/elias/data/thesis_intermediate/data/scratch/temp'
+raw_dir:          '/media/elias/data/thesis_intermediate/data/raw'
+scratch_dir:      '/media/elias/data/thesis_intermediate/data/scratch'
+atlas_dir:        '/media/elias/data/thesis_intermediate/data/scratch/atlas'
+comfort_dir:      '/media/elias/data/thesis_intermediate/data/scratch/comfort'
+events_dir:       '/media/elias/data/thesis_intermediate/data/scratch/events'
+fs_subjects_dir:  '/media/elias/data/thesis_intermediate/data/scratch/fs_subjects_dir'
+fwd_dir:          '/media/elias/data/thesis_intermediate/data/scratch/fwd'
+harm_dir:         '/media/elias/data/thesis_intermediate/data/scratch/harm'
+morph_dir:        '/media/elias/data/thesis_intermediate/data/scratch/morph'
+sn_subjects_dir:  '/media/elias/data/thesis_intermediate/data/scratch/sn_subjects_dir'
+trans_dir:        '/media/elias/data/thesis_intermediate/data/scratch/trans'
+volume_dir:       '/media/elias/data/thesis_intermediate/data/scratch/volume'
+raw_subset_dir:   '/media/elias/data/thesis_intermediate/data/scratch/raw_subset'
+raw_filtered_dir: '/media/elias/data/thesis_intermediate/data/scratch/raw_filtered'
+scripts_dir:      '/media/elias/data/thesis_intermediate/data/scritps'
+sensor_dir:       '/media/elias/data/thesis_intermediate/data/scratch/sensor'
 
 #Intermediate files
-epochs_dir:       '/home/elias/Documents/thesis_intermediate/data/scratch/epochs'
-hilbert_dir:      '/home/elias/Documents/thesis_intermediate/data/scratch/hilbert'
-hilbert_ref_dir:  '/home/elias/Documents/thesis_intermediate/data/scratch/hilbert_reference'
-stc_dir:          '/home/elias/Documents/thesis_intermediate/data/scratch/stc/subjects'
-results_dir:          '/home/elias/Documents/thesis_intermediate/data/scratch/results'
+epochs_dir:       '/media/elias/data/thesis_intermediate/data/scratch/epochs'
+hilbert_dir:      '/media/elias/data/thesis_intermediate/data/scratch/hilbert'
+hilbert_ref_dir:  '/media/elias/data/thesis_intermediate/data/scratch/hilbert_reference'
+stc_dir:          '/media/elias/data/thesis_intermediate/data/scratch/stc/subjects'
+results_dir:      '/home/elias/Workspace/thesis/iliasgdk_thesis/results'
 
 
 subject_nr_list:  ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9', 's10', 's11', 's12']
