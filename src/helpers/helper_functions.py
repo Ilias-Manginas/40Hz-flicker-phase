@@ -91,13 +91,27 @@ def load_raw_filtered(subject, preload=True):
     # raw.set_channel_types(mapping={'MISC001': 'misc'})
     return raw
 
-def load_fwd_model(subject):
+def load_fwd_model(subject_idx):
     ss = settings_dict()
-    fwd_fname = op.join(ss['fwd_dir'], subject + '-fwd.fif')
-    fwd = mne.read_forward_solution(fwd_fname)
+    subject = ss['subject_id_list'][subject_idx]
+
     # some of the forward models have the wrong subject name
-    if fwd['src'][0]['subject_his_id'].startswith("fs"):
+    if subject_idx == 1:
+        # fwd_fname = op.join(ss['fwd_dir'], '_old', '070719', subject + '-fwd.fif')
+        fwd_fname = op.join(ss['fwd_dir'], subject + '-fwd.fif')
+        fwd = mne.read_forward_solution(fwd_fname)
         fwd['src'][0]['subject_his_id'] = subject
+    elif subject_idx == 4:
+        fwd_fname = op.join(ss['fwd_dir'], subject + '-fwd.fif')
+        fwd = mne.read_forward_solution(fwd_fname)
+        fwd['src'][0]['subject_his_id'] = subject
+    elif subject_idx == 8:
+        fwd_fname = op.join(ss['fwd_dir'], subject + '-fwd.fif')
+        fwd = mne.read_forward_solution(fwd_fname)
+        fwd['src'][0]['src_mri_t']['trans'][2, 3] = -0.039
+    else:
+        fwd_fname = op.join(ss['fwd_dir'], subject + '-fwd.fif')
+        fwd = mne.read_forward_solution(fwd_fname)
     return fwd
 
 
