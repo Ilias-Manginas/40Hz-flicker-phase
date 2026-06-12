@@ -76,7 +76,7 @@ def _render_multi_imgs(args):
     #figsize=(8, 6)
     fig = plt.figure(figsize=figsize)
 
-    fig.suptitle(f"{title}",
+    fig.suptitle(f"{title}  |  {times*1000:.1f} ms",
                  fontsize=12,
                  color="white"
                  )
