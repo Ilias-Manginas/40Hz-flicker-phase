@@ -7,6 +7,19 @@ import mne
 
 def extract_voxel_coords_from_stc(stc,voxel,src):
     # isolate voxel
+    stc_single = get_stc_single_voxel(stc,voxel)
+
+    img = stc_single.as_volume(src=src)
+
+    # choose time index
+    img3d = index_img(img, 0)
+
+    coords = find_xyz_cut_coords(img3d)
+
+    return coords
+
+def get_stc_single_voxel(stc,voxel):
+    # isolate voxel
     data = np.zeros_like(stc.data)
     data[voxel, :] = stc.data[voxel, :]
 
@@ -18,14 +31,7 @@ def extract_voxel_coords_from_stc(stc,voxel,src):
         subject=stc.subject,
     )
 
-    img = stc_single.as_volume(src=src)
-
-    # choose time index
-    img3d = index_img(img, 0)
-
-    coords = find_xyz_cut_coords(img3d)
-
-    return coords
+    return stc_single
 
 def get_masked_stc(stc, mask):
     masked_data = stc.copy().data
@@ -35,75 +41,20 @@ def get_masked_stc(stc, mask):
     masked_stc = stc.copy()
     masked_stc.data = masked_data
 
-    return masked_stc
-
-def plot_stcs(stcs,
-                       srcs,
-                      t1s,
-                      title,
-                      fig_titles,
-                      nrows,
-                      ncols,
-                      figsize,
-                      display_mode="ortho",
-                      draw_cross=False,
-                      cut_coords=(-26, -49, -6),
-                      dpi=100,
-                      vmin = 0,
-                      vmax = 1):
-
-
-
-    img_list = []
-    for stc, src in zip(stcs, srcs):
-
-        img = index_img(stc.as_volume(src), 0)
-
-        img_list.append(img)
-
-    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize, dpi=dpi)
-
-    fig.suptitle(f"{title}",
-                 fontsize=16,
-                 color="white"
-                 )
-
-    axes = np.ravel(axes)  # flatten 2D grid into 1D
-
-    for img, ax, fig_title, t1 in zip(img_list, axes, fig_titles, t1s):
-        plot_stat_map(
-            img,
-            bg_img=t1,
-            display_mode=display_mode,
-            cut_coords=cut_coords,
-            vmin=-vmin,
-            vmax=vmax,
-            draw_cross=draw_cross,
-            axes=ax,
-            colorbar=(img_list.index(img)+1 == ncols),
-            title = f"{fig_title}"
-        )
-
-    fig.patch.set_facecolor((0, 0, 0))
-    fig.subplots_adjust(left=0, right=1, top=0.90, bottom=0, hspace=0.1)
-    fig.canvas.draw()
-
-    plt.show()
-
-def plot_stcs1(stcs,
-                       srcs,
-                      t1s,
-                      title,
-                      fig_titles,
-                      nrows,
-                      ncols,
-                      figsize,
-                      display_mode="ortho",
-                      draw_cross=False,
-                      cut_coords=(-26, -49, -6),
-                      dpi=100,
-                      vmin = 0,
-                      vmax = 1):
+def plot_different_stcs(stcs,
+                        srcs,
+                        t1s,
+                        title,
+                        fig_titles,
+                        nrows,
+                        ncols,
+                        figsize,
+                        display_mode="ortho",
+                        draw_cross=False,
+                        cut_coords=(-26, -49, -6),
+                        dpi=100,
+                        vmin = 0,
+                        vmax = 1):
 
 
 
@@ -121,8 +72,8 @@ def plot_stcs1(stcs,
                  color="white"
                  )
 
-    for img, fig_title, t1 in zip(img_list, fig_titles, t1s):
-        ax = fig.add_subplot(nrows, ncols, img_list.index(img)+1)
+    for img, fig_title, t1, i in zip(img_list, fig_titles, t1s, range(len(img_list))):
+        ax = fig.add_subplot(nrows, ncols, i + 1)
         plot_stat_map(
             img,
             bg_img=t1,
@@ -132,7 +83,7 @@ def plot_stcs1(stcs,
             vmax=vmax,
             draw_cross=draw_cross,
             axes=ax,
-            colorbar=(img_list.index(img)+1 == ncols),
+            colorbar=(i+1 == ncols),
         )
 
         ax.set_title(fig_title, fontsize=10, color="white", loc="left")
@@ -141,20 +92,20 @@ def plot_stcs1(stcs,
     fig.subplots_adjust(top=0.90)
     plt.show()
 
-def plot_stc2(stcs,
-                       src,
-                      t1,
-                      title,
-                      fig_titles,
-                      nrows,
-                      ncols,
-                      figsize,
-                      display_mode="ortho",
-                      draw_cross=False,
-                      cut_coords=(-26, -49, -6),
-                      dpi=100,
-                      vmin = 0,
-                      vmax = 1):
+def plot_same_stc(stcs,
+                  src,
+                  t1,
+                  title,
+                  fig_titles,
+                  nrows,
+                  ncols,
+                  figsize,
+                  display_mode="ortho",
+                  draw_cross=False,
+                  cut_coords=(-26, -49, -6),
+                  dpi=100,
+                  vmin = 0,
+                  vmax = 1):
 
 
 
@@ -172,8 +123,8 @@ def plot_stc2(stcs,
                  color="white"
                  )
 
-    for img, fig_title in zip(img_list, fig_titles):
-        ax = fig.add_subplot(nrows, ncols, img_list.index(img)+1)
+    for img, fig_title, i in zip(img_list, fig_titles, range(len(img_list))):
+        ax = fig.add_subplot(nrows, ncols, i + 1)
         plot_stat_map(
             img,
             bg_img=t1,
@@ -183,7 +134,7 @@ def plot_stc2(stcs,
             vmax=vmax,
             draw_cross=draw_cross,
             axes=ax,
-            colorbar=(img_list.index(img)+1 == ncols),
+            colorbar=(i+1 == ncols),
         )
 
         ax.set_title(fig_title, fontsize=10, color="white", loc="left")

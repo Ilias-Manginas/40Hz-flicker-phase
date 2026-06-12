@@ -1,0 +1,52 @@
+site_name: pycircstat2
+theme:
+    name: material
+    features:
+        - navigation.sections
+        - content.code.copy
+        - content.tabs.link
+        - content.mathjax
+
+plugins:
+    - search
+    - mkdocstrings:
+          handlers:
+              python:
+                  paths:
+                      - ../pycircstat2
+                  options:
+                      show_source: true
+                      docstring_style: "numpy"
+                      show_symbol_type_toc: true
+                      show_root_toc_entry: true
+                      members_order: "source"
+
+nav:
+    - Home: index.md
+    - Feature Checklist: feature-checklist.md
+    - API Reference:
+          - Circular Data Base: reference/base.md
+          - Descriptive Statistics: reference/descriptive.md
+          - Hypothesis Testing: reference/hypothesis.md
+          - Correlation: reference/correlation.md
+          - Regression: reference/regression.md
+          - Distributions: reference/distributions.md
+          - Clustering: reference/clustering.md
+          - Visualization: reference/visualization.md
+          - Utilities: reference/utils.md
+
+markdown_extensions:
+    - footnotes
+    - pymdownx.arithmatex:
+          generic: true
+    - toc:
+          toc_depth: 2
+
+extra_javascript:
+    - javascripts/mathjax.js
+    - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+extra_css:
+    - css/extra.css
+
+watch:
+    - ../pycircstat2

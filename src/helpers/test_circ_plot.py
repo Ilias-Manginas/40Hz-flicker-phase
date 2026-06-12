@@ -26,7 +26,7 @@ def plot_circ_stat_map(stcs,
                       display_mode="ortho",
                       draw_cross=False,
                       cut_coords=(-26, -49, -6),
-                      dpi=100):
+                      dpi=100,):
 
     t1 = op.join(subjects_dir, subject, 'mri', 'T1.mgz')
 

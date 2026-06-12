@@ -1,0 +1,1954 @@
+import warnings
+from typing import Optional, Tuple, Union
+
+import numpy as np
+from scipy.stats import chi2, norm
+
+from .utils import angmod, is_within_circular_range
+
+# Decimal places for rounding angular comparisons in median routines.
+# 8 decimals ≈ 5e-9 rad ≈ 3e-7° tolerance, matching the 1e-8 absolute tie
+# tolerance used by R's `median.circular`.
+_ANGLE_DECIMALS = 8
+
+# Switch to chunked pairwise mean deviation above this many points to bound memory.
+_MEAN_DEV_CHUNK_THRESHOLD = 10000
+
+
+def circ_r(
+    alpha: Optional[np.ndarray] = None,
+    w: Optional[np.ndarray] = None,
+    Cbar: Optional[float] = None,
+    Sbar: Optional[float] = None,
+) -> float:
+    r"""
+    Circular mean resultant vector length (r).
+
+    $$
+    r = \sqrt{\bar{C}^2 + \bar{S}^2}
+    $$
+
+    Parameters
+    ----------
+    alpha: np.array (n, )
+        Angles in radian.
+    w: np.array (n,)
+        Frequencies or weights
+    Cbar, Sbar: float
+        Precomputed intermediate values
+
+    Returns
+    -------
+    r: float
+        Resultant vector length
+
+    References
+    ----------
+    Implementation of Example 26.5 (Zar, 2010)
+    """
+    if Cbar is None or Sbar is None:
+        if alpha is None:
+            raise ValueError("`alpha` is required if `Cbar` and `Sbar` are not provided.")
+        w = np.ones_like(alpha) if w is None else w
+        Cbar, Sbar = compute_C_and_S(alpha, w)
+
+    r = np.sqrt(Cbar**2 + Sbar**2)
+
+    return r
+
+
+def circ_mean(
+    alpha: np.ndarray,
+    w: Optional[np.ndarray] = None,
+) -> float:
+    r"""
+    Circular mean (m).
+
+    $$\cos\bar\theta = C/R,\space \sin\bar\theta = S/R$$
+    
+    or 
+
+    $$
+    \bar\theta =
+    \begin{cases} 
+    \tan^{-1}\left(S/C\right), & \text{if } S > 0, C > 0 \\ 
+    \tan^{-1}\left(S/C\right) + \pi, & \text{if } C < 0 \\ 
+    \tan^{-1}\left(S/C\right) + 2\pi, & \text{S < 0, C > 0}
+    \end{cases}
+    $$
+
+    Parameters
+    ----------
+    alpha: np.array (n, )
+        Angles in radian.
+    w: np.array (n,)
+        Frequencies or weights
+
+    Returns
+    -------
+    m: float or NaN
+        Circular mean
+
+    Note
+    ----
+    Implementation of Example 26.5 (Zar, 2010)
+    """
+    if w is None:
+        w = np.ones_like(alpha)
+
+    # mean resultant vector length
+    Cbar, Sbar = compute_C_and_S(alpha, w)
+    r = circ_r(alpha, w, Cbar, Sbar)
+
+    # angular mean (tolerance matches `circ_mean_and_r` for consistency)
+    if np.isclose(r, 0.0, atol=1e-12):
+        m = np.nan
+    else:
+        m = np.arctan2(Sbar, Cbar)
+
+    return float(angmod(m))
+
+
+def circ_mean_and_r(
+    alpha: np.ndarray,
+    w: Optional[np.ndarray] = None,
+) -> Tuple[float, float]:
+    """
+    Circular mean (m) and resultant vector length (r).
+
+    Parameters
+    ----------
+    alpha: np.array (n, )
+        Angles in radian.
+    w: np.array (n,)
+        Frequencies or weights
+
+    Returns
+    -------
+    m: float or NaN
+        Circular mean
+    r: float
+        Resultant vector length
+
+    Note
+    ----
+    Implementation of Example 26.5 (Zar, 2010)
+    """
+    if w is None:
+        w = np.ones_like(alpha)
+
+    # mean resultant vector length
+    Cbar, Sbar = compute_C_and_S(alpha, w)
+    r = circ_r(alpha, w, Cbar, Sbar)
+
+    # angular mean
+    if np.isclose(r, 0.0, atol=1e-12):
+        return float(np.nan), float(r)
+
+    m = np.arctan2(Sbar, Cbar)
+
+    return float(angmod(m)), float(r)
+
+
+def circ_mean_and_r_of_means(
+    circs: Union[list, None] = None,
+    ms: Optional[np.ndarray] = None,
+    rs: Optional[np.ndarray] = None,
+) -> Tuple[float, float]:
+    """The Mean of a set of Mean Angles
+
+    Parameters
+    ----------
+    circs: list
+        a list of Circular Objects
+
+    ms: np.array (n, )
+        a set of mean angles in radian
+
+    rs: np.array (n, )
+        a set of mean resultant vector lengths
+
+    Returns
+    -------
+    m: float
+        mean of means in radian
+
+    r: float
+        mean of mean resultant vector lengths
+
+    """
+    if circs is None:
+        if ms is None or rs is None:
+            raise ValueError("If `circs` is None, then `ms` and `rs` must be provided.")
+        ms_arr = np.asarray(ms, dtype=float)
+        rs_arr = np.asarray(rs, dtype=float)
+    else:
+        extracted = [(circ.mean, circ.r) for circ in circs]
+        if len(extracted) == 0:
+            raise ValueError("`circs` must contain at least one element.")
+        arr = np.asarray(extracted, dtype=float)
+        ms_arr, rs_arr = arr[:, 0], arr[:, 1]
+
+    if ms_arr.ndim != 1 or rs_arr.ndim != 1:
+        raise ValueError("`ms` and `rs` must be one-dimensional sequences of equal length.")
+
+    if ms_arr.size != rs_arr.size or ms_arr.size == 0:
+        raise ValueError("`ms` and `rs` must be non-empty and have the same length.")
+
+    X = np.mean(np.cos(ms_arr) * rs_arr)
+    Y = np.mean(np.sin(ms_arr) * rs_arr)
+    r = np.hypot(X, Y)
+
+    if np.isclose(r, 0.0, atol=1e-12):
+        return float(np.nan), float(r)
+
+    m = angmod(np.arctan2(Y, X))
+
+    return float(m), float(r)
+
+
+def circ_moment(
+    alpha: np.ndarray,
+    w: Optional[np.ndarray] = None,
+    p: int = 1,
+    mean: Union[float, np.ndarray, None] = None,
+    centered: bool = False,
+) -> complex:
+    r"""
+    Compute the p-th circular moment.
+
+    $$
+    m^{\prime}_{p} = \bar{C}_{p} + i\bar{S}_{p}
+    $$
+
+    Parameters
+    ----------
+    alpha: np.ndarray
+        Angles in radian.
+    w: np.ndarray, optional
+        Frequencies or weights. If None, equal weights are used.
+    p: int, optional
+        Order of the moment to compute.
+    mean: float, optional
+        Precomputed circular mean. If None, mean is computed internally.
+    centered: bool, optional
+        If True, center alpha by subtracting the mean.
+
+    Returns
+    -------
+    mp: complex
+        The p-th circular moment as a complex number.
+
+    Note
+    ----
+    Implementation of Equation 2.24 (Fisher, 1993).
+    """
+    if w is None:
+        w = np.ones_like(alpha)
+
+    if mean is None:
+        mean = circ_mean(alpha, w) if centered else 0.0
+
+    Cbar, Sbar = compute_C_and_S(alpha, w, p, mean)
+
+    return Cbar + 1j * Sbar
+
+
+def circ_dispersion(
+    alpha: np.ndarray,
+    w: Optional[np.ndarray] = None,
+    mean=None,
+) -> float:
+    r"""
+    Sample Circular Dispersion, defined by Equation 2.28 (Fisher, 1993):
+
+    $$
+    \hat\delta = (1 - \hat\rho_{2})/(2 \hat\rho_{1}^{2})
+    $$
+
+    Parameters
+    ----------
+
+    alpha: np.array, (n, )
+        Angles in radian.
+    w: None or np.array, (n)
+        Frequencies or weights
+    mean: None or float
+        Precomputed circular mean.
+
+    Returns
+    -------
+    dispersion: float
+        Sample Circular Dispersion
+    """
+
+    if w is None:
+        w = np.ones_like(alpha)
+
+    mp1 = circ_moment(alpha=alpha, w=w, p=1, mean=mean, centered=False)  # eq(2.26)
+    mp2 = circ_moment(alpha=alpha, w=w, p=2, mean=mean, centered=False)  # eq(2.27)
+
+    r1 = np.abs(mp1)
+    r2 = np.abs(mp2)
+
+    dispersion = (1 - r2) / (2 * r1**2)  # eq(2.28)
+
+    return dispersion
+
+
+def circ_skewness(alpha: np.ndarray, w: Optional[np.ndarray] = None) -> float:
+    r"""
+    Circular skewness, as defined by Equation 2.29 (Fisher, 1993):
+
+    $$\hat s = [\hat\rho_2 \sin(\hat\mu_2 - 2 \hat\mu_1)] / (1 - \hat\rho_1)^{\frac{3}{2}}$$
+
+    But unlike the implementation of Fisher (1993), here we followed Pewsey et al. (2014) by NOT centering the second moment.
+
+    Parameters
+    ----------
+
+    alpha: np.array, (n, )
+        Angles in radian.
+    w: None or np.array, (n)
+        Frequencies or weights
+
+    Returns
+    -------
+    skewness: float
+        Circular Skewness
+    """
+
+    if w is None:
+        w = np.ones_like(alpha)
+
+    mp1 = circ_moment(alpha=alpha, w=w, p=1, mean=None, centered=False)
+    mp2 = circ_moment(alpha=alpha, w=w, p=2, mean=None, centered=False)  # eq(2.27)
+
+    u1, r1 = convert_moment(mp1)
+    u2, r2 = convert_moment(mp2)
+
+    skewness = (r2 * np.sin(u2 - 2 * u1)) / (1 - r1) ** 1.5
+
+    return skewness
+
+
+def circ_kurtosis(alpha: np.ndarray, w: Optional[np.ndarray] = None) -> float:
+    r"""
+    Circular kurtosis, as defined by Equation 2.30 (Fisher, 1993):
+
+    $$\hat k = [\hat\rho_2 \cos(\hat\mu_2 - 2 \hat\mu_1) - \hat\rho_1^4] / (1 - \hat\rho_1)^{2}$$
+
+    But unlike the implementation of Fisher (1993), here we followed Pewsey et al. (2014) by **NOT** centering the second moment.
+
+    Parameters
+    ----------
+
+    alpha: np.array, (n, )
+        Angles in radian.
+    w: None or np.array, (n)
+        Frequencies or weights
+
+    Returns
+    -------
+    kurtosis: float
+        Circular Kurtosis
+    """
+
+    if w is None:
+        w = np.ones_like(alpha)
+
+    mp1 = circ_moment(alpha=alpha, w=w, p=1, mean=None, centered=False)
+    mp2 = circ_moment(alpha=alpha, w=w, p=2, mean=None, centered=False)  # eq(2.27)
+
+    u1, r1 = convert_moment(mp1)
+    u2, r2 = convert_moment(mp2)
+
+    kurtosis = (r2 * np.cos(u2 - 2 * u1) - r1**4) / (1 - r1) ** 2
+
+    return kurtosis
+
+
+def angular_var(
+    alpha: Optional[np.ndarray] = None,
+    w: Optional[np.ndarray] = None,
+    r: Optional[float] = None,
+    bin_size: Optional[float] = None,
+) -> float:
+    r"""
+    Angular variance
+
+    Parameters
+    ----------
+    alpha: np.array (n, ) or None
+        Angles in radian.
+    w: np.array (n,) or None
+        Frequencies or weights
+    r: float or None
+        Resultant vector length
+    bin_size: float
+        Interval size of grouped data. Needed for correcting biased r.
+
+    Returns
+    -------
+    angular_variance: float
+        Angular variance, range from 0 to 2.
+
+    References
+    ----------
+    - Batschelet (1965, 1981), from Section 26.5 of Zar (2010)
+    """
+
+    variance = circ_var(alpha=alpha, w=w, r=r, bin_size=bin_size)
+    angular_variance = 2 * variance
+    return angular_variance
+
+
+def angular_std(
+    alpha: Optional[np.ndarray] = None,
+    w: Optional[np.ndarray] = None,
+    r: Optional[float] = None,
+    bin_size: Optional[float] = None,
+) -> float:
+    r"""
+    Angular (standard) deviation
+
+    $$
+    s = \sqrt{2V} = \sqrt{2(1 - r)}
+    $$
+
+    Parameters
+    ----------
+    alpha: np.array (n, ) or None
+        Angles in radian.
+    w: np.array (n,) or None
+        Frequencies or weights
+    r: float or None
+        Resultant vector length
+    bin_size: float
+        Interval size of grouped data. Needed for correcting biased r.
+
+    Returns
+    -------
+    angular_std: float
+        Angular (standard) deviation, range from 0 to sqrt(2).
+
+    References
+    ----------
+    - Equation 26.20 of Zar (2010)
+    """
+
+    angular_variance = angular_var(alpha=alpha, w=w, r=r, bin_size=bin_size)
+    angular_std = np.sqrt(angular_variance)
+    return angular_std
+
+
+def circ_var(
+    alpha: Optional[np.ndarray] = None,
+    w: Optional[np.ndarray] = None,
+    r: Optional[float] = None,
+    bin_size: Optional[float] = None,
+) -> float:
+    r"""
+    Circular variance
+
+    $$ V = 1 - r $$
+
+    Parameters
+    ----------
+    alpha: np.array (n, ) or None
+        Angles in radian.
+    w: np.array (n,) or None
+        Frequencies or weights
+    r: float or None
+        Resultant vector length
+    bin_size: float
+        Interval size of grouped data. Needed for correcting biased r.
+
+    Returns
+    -------
+    variance: float
+        Circular variance, range from 0 to 1.
+
+    References
+    ----------
+    - Equation 2.11 of Fisher (1993)
+    - Equation 26.17 of Zar (2010)
+    """
+
+    # If `r` is provided, use it directly
+    if r is None:
+        if alpha is None:
+            raise ValueError("If `r` is None, then `alpha` is required to compute it.")
+        r = circ_r(alpha, w)  # `circ_r` already handles `w=None` as `np.ones_like(alpha)`
+
+    # Determine bin_size if not explicitly provided
+    if bin_size is None and w is not None and not np.all(w == w[0]):
+        if alpha is None:
+            raise ValueError("If `bin_size` is None but `w` is provided, `alpha` must be given.")
+        # `np.diff(alpha).min()` only makes sense as a bin width on sorted bin
+        # centers; an unsorted input would silently yield a negative bin_size.
+        if np.any(np.diff(alpha) <= 0):
+            raise ValueError(
+                "`alpha` must be strictly increasing bin centers when inferring "
+                "`bin_size`; pass `bin_size=` explicitly otherwise."
+            )
+        bin_size = float(np.diff(alpha).min())
+
+    # Correct `r` if binning is applied
+    rc = r if bin_size is None or bin_size == 0 else r * (bin_size / (2 * np.sin(bin_size / 2)))
+
+    variance = 1 - rc
+
+    return variance
+
+
+def circ_std(
+    alpha: Optional[np.ndarray] = None,
+    w: Optional[np.ndarray] = None,
+    r: Optional[float] = None,
+    bin_size: Optional[float] = None,
+) -> float:
+    r"""
+    Circular standard deviation (s).
+
+    $$ s = \sqrt{-2 \ln(1 - V)} $$
+
+    Parameters
+    ----------
+    alpha: np.array (n, ) or None
+        Angles in radian.
+    w: np.array (n,) or None
+        Frequencies or weights
+    r: float or None
+        Resultant vector length
+    bin_size: float
+        Interval size of grouped data.
+        Needed for correcting biased r.
+
+    Returns
+    -------
+    s: float
+        Circular standard deviation.
+
+    References
+    ----------
+    Implementation of Equation 26.15-16/20-21 (Zar, 2010)
+    """
+    var = circ_var(alpha=alpha, w=w, r=r, bin_size=bin_size)
+
+    # circular standard deviation
+    s = np.sqrt(-2 * np.log(1 - var))  # eq(26.21)
+
+    return s
+
+
+def circ_median(
+    alpha: np.ndarray,
+    w: Optional[np.ndarray] = None,
+    method: Optional[str] = "deviation",
+    return_average: bool = True,
+    average_method: str = "all",
+    verbose: bool = False,
+) -> Union[float, np.ndarray]:
+    r"""
+    Circular median.
+
+    For ungrouped data, the supported methods are (Fisher, 1993; Otieno, 2002):
+
+    - `deviation`: angle with minimal circular mean deviation.
+    - `count`: angle that splits the sample equally on either side.
+    - `HL1`, `HL2`, `HL3`: Hodges-Lehmann estimates — the deviation-method
+      median of pairwise circular means, with HL1/HL2/HL3 differing in which
+      pairs are used (no self-pairs / with self-pairs / all ordered pairs).
+
+    For grouped data, we use the method described in Mardia (1972).
+
+    Parameters
+    ----------
+    alpha: np.array (n, )
+        Angles in radian.
+    w: np.array (n,) or None
+        Frequencies or weights
+    method: str
+        - For ungrouped data: ``deviation`` (default), ``count``, ``HL1``,
+          ``HL2``, or ``HL3``.
+        - Set to ``none`` (or ``None``) to return ``np.nan``.
+    return_average: bool
+        Return the average of the median
+    average_method: str
+        - all: circular mean of all medians (repeated angles in `alpha` count
+          with their multiplicity, so a duplicated candidate is weighted more)
+        - unique: circular mean of unique median candidates
+
+    Returns
+    -------
+    median: float or NaN
+
+    References
+    ----------
+    - For ungrouped data: Section 2.3.2 of Fisher (1993)
+    - For grouped data: Mardia (1972)
+    - For HL1/HL2/HL3: Otieno, B. S. (2002), "An Alternative Estimate of
+      Preferred Direction for Circular Data", PhD thesis, Virginia Tech,
+      §3.4 and Appendix E.
+    """
+
+    if w is None:
+        w = np.ones_like(alpha)
+
+    # edge cases for early exit
+    # if all mass is at a single direction (r == 1), the median is that direction.
+    # Use the weighted resultant so this works for grouped data where the populated
+    # bin isn't necessarily alpha[0].
+    if np.isclose(circ_r(alpha, w), 1.0, atol=1e-12):
+        if verbose:
+            print("All points coincide, returning the resultant direction as median.")
+        return float(circ_mean(alpha, w))
+
+    # grouped data
+    if not np.all(w == 1):
+        median = _circ_median_grouped(alpha, w)
+    # ungrouped data
+    else:
+        # find which data point that can divide the dataset into two half
+        if method == "count":
+            median = _circ_median_count(alpha)
+        # find the angle that has the minimal mean deviation
+        elif method == "deviation":
+            median = _circ_median_mean_deviation(alpha)
+        elif method in ("HL1", "HL2", "HL3"):
+            median = _circ_median_HL(alpha, method)
+        elif method == "none" or method is None:
+            return float(np.nan)
+        else:
+            raise ValueError(
+                f"Method `{method}` for `circ_median` is not supported.\n"
+                "Try `deviation`, `count`, `HL1`, `HL2`, or `HL3`."
+            )
+
+    if return_average:
+        if average_method == "all":
+            # Circular mean of all medians
+            median = circ_mean(alpha=np.asarray(median))
+        elif average_method == "unique":
+            # Circular mean of unique medians
+            median = circ_mean(alpha=np.unique(median))
+        else:
+            raise ValueError(
+                f"Average method `{average_method}` is not supported.\nTry `all` or `unique`."
+            )
+
+    return angmod(median)
+
+
+def _circ_median_grouped(
+    alpha: np.ndarray,
+    w: np.ndarray,
+) -> Union[float, np.ndarray]:
+    # `alpha` is expected to be the bin centers in increasing order, with `w[i]`
+    # the count for the bin centered at `alpha[i]`. `bin_size` is taken as the
+    # smallest forward difference, so an unsorted input would yield a
+    # nonsensical (possibly negative) bin size.
+    if np.any(np.diff(alpha) <= 0):
+        raise ValueError("`alpha` must be strictly increasing bin centers.")
+
+    n = np.sum(w)  # sample size
+    n_bins = len(alpha)  # number of intervals
+    bin_size = np.diff(alpha).min()
+
+    # median for grouped data operated on upper bound of bins
+    alpha_ub = alpha + bin_size / 2
+    alpha_rotated = angmod(alpha_ub[:, None] - alpha_ub)
+    pi_round = np.round(np.pi, _ANGLE_DECIMALS)
+    right = np.logical_and(alpha_rotated >= 0.0, alpha_rotated <= pi_round)
+    halfcircle_right = np.array(
+        [np.sum(np.roll(w, -1)[right[:, i]]) for i in range(len(alpha))]
+    )
+    halfcircle_left = n - halfcircle_right
+
+    if n_bins % 2 != 0:
+        # The diameter from alpha_ub[i] cuts through bin (i + n_bins//2 + 1) mod n_bins.
+        # halfcircle_right counts that bin's full weight; only the half on its side
+        # of the cut belongs there, so add the missing half to halfcircle_left.
+        offset = np.roll(w, -(n_bins // 2 + 1)) / 2
+        halfcircle_left = halfcircle_left + offset
+
+    # find where half-freq located.
+    halffreq = np.round(n / 2, _ANGLE_DECIMALS)
+    halfcircle_range = np.round(
+        np.vstack([halfcircle_left, np.roll(halfcircle_left, -1)]).T, _ANGLE_DECIMALS
+    )
+    idx = np.where(
+        np.logical_and(
+            halffreq >= halfcircle_range[:, 0], halffreq <= halfcircle_range[:, 1]
+        ),
+    )[0]
+
+    # if number of potential median is the same as the number of data points,
+    # meaning that the data is more or less uniformly distributed. Return NaN.
+    if len(idx) == len(halfcircle_range):
+        median = np.nan
+    # get base interval, lower and upper freq
+    elif len(idx) == 1:
+        freq_lower, freq_upper = np.sort(halfcircle_range[idx][0])
+        base = alpha_ub[idx][0]
+        ratio = (halffreq - freq_lower) / (freq_upper - freq_lower)
+        median = base + bin_size * ratio
+    else:
+        # remove empty bins.
+        select = halfcircle_range[idx, 0] != halfcircle_range[idx, 1]
+        # find outer bounds.
+        lower = alpha_ub[idx[select][0]] + bin_size
+        upper = alpha_ub[idx[select][1]]
+        # circular mean of two opposite points will always be NaN.
+        # in this case, we use the inner bounds instead of the outer.
+        if np.isclose(upper - lower, np.pi):
+            lower = lower - bin_size
+            upper = upper + bin_size
+        median = np.array([lower, upper])
+
+    return median
+
+
+def _circ_median_count(alpha: np.ndarray) -> Union[float,np.ndarray]:
+    n = len(alpha)
+    alpha_rotated = np.round(angmod((alpha[:, None] - alpha)), decimals=_ANGLE_DECIMALS)
+    pi_round = np.round(np.pi, _ANGLE_DECIMALS)
+
+    # count number of points on the right (0, 180), excluding the boundaries
+    right = np.logical_and(alpha_rotated > 0.0, alpha_rotated < pi_round).sum(0)
+    # count number of points on the boundaries
+    exact = np.logical_or(
+        np.isclose(alpha_rotated, 0.0), np.isclose(alpha_rotated, pi_round)
+    ).sum(0)
+    # count number of points on the left (180, 360), excluding the boundaries
+    left = n - right - 0.5 * exact
+    right = right + 0.5 * exact
+    # find the point(s) location where the difference of number of points
+    # on right and left is/ are minimal
+    diff = np.abs(right - left)
+    idx_candidates = np.where(diff == diff.min())[0]
+    # if number of potential median is the same as the number of data point
+    # meaning that the data is more or less uniformly distributed. Return NaN.
+    if len(idx_candidates) == len(alpha):
+        median = np.nan           
+    # if number of potential median is 1, return it as median
+    elif len(idx_candidates) == 1:
+        median = alpha[idx_candidates][0]
+    # if there are more than one potential median, return them all
+    else:
+        median = alpha[idx_candidates]
+
+    return median
+
+
+def _circ_median_mean_deviation(alpha: np.ndarray) -> Union[float,np.ndarray]:
+    """
+    Note
+    ----
+    Implementation of Section 2.3.2 of Fisher (1993)
+    """
+
+    # get pairwise circular mean deviation
+    if len(alpha) > _MEAN_DEV_CHUNK_THRESHOLD:
+        angdist = circ_mean_deviation_chunked(alpha, alpha)
+    else:
+        # get pairwise circular mean deviation
+        angdist = circ_mean_deviation(alpha, alpha)
+    # data point(s) with minimal circular mean deviation is/are potential median(s);
+    idx_candidates = np.where(angdist == angdist.min())[0]
+    # if number of potential median is the same as the number of data point
+    # meaning that the data is more or less uniformly distributed. Return NaN.
+    if len(idx_candidates) == len(alpha):
+        median = np.nan            
+    # if number of potential median is 1, return it as median
+    elif len(idx_candidates) == 1:
+        median = alpha[idx_candidates][0]
+    # if there are more than one potential median, return them all
+    else:
+        median = alpha[idx_candidates]
+
+    return median
+
+
+def _circ_median_HL(
+    alpha: np.ndarray,
+    method: str,
+) -> Union[float, np.ndarray]:
+    """
+    Hodges-Lehmann circular median (Otieno, 2002).
+
+    The HL estimate is the circular median of pairwise circular means. The three
+    variants differ in which pairs are used (Otieno thesis §3.4, Appendix E):
+
+    - ``HL1``: pairs ``(i, j)`` with ``i < j`` — ``n(n-1)/2`` means.
+    - ``HL2``: HL1 plus the observations themselves (self-pairs) — ``n(n+1)/2``
+      means. This is the canonical Hodges-Lehmann choice.
+    - ``HL3``: HL1 ∪ HL2, equivalent to all ``n²`` ordered pairs — HL1 means
+      counted twice plus each observation once.
+
+    Pairs whose circular mean is undefined (antipodal: ``sinα+sinβ ≈ 0`` and
+    ``cosα+cosβ ≈ 0``) are dropped.
+
+    The inner median over the pair-mean array is the Fisher/Mardia deviation
+    method, matching ``cmedM`` in Otieno's reference S-Plus code (Appendix E.9).
+    """
+    n = len(alpha)
+    sin_a = np.sin(alpha)
+    cos_a = np.cos(alpha)
+
+    i_idx, j_idx = np.triu_indices(n, k=1)
+    sin_sum = sin_a[i_idx] + sin_a[j_idx]
+    cos_sum = cos_a[i_idx] + cos_a[j_idx]
+    valid = np.hypot(sin_sum, cos_sum) > 10 ** (-_ANGLE_DECIMALS)
+    pair_means = np.arctan2(sin_sum[valid], cos_sum[valid])
+
+    if method == "HL1":
+        candidates = pair_means
+    elif method == "HL2":
+        candidates = np.concatenate([pair_means, alpha])
+    elif method == "HL3":
+        candidates = np.concatenate([pair_means, pair_means, alpha])
+    else:
+        raise ValueError(f"Unknown HL method: {method!r}")
+
+    if candidates.size == 0:
+        return float(np.nan)
+
+    return _circ_median_mean_deviation(angmod(candidates))
+
+
+def circ_mean_deviation_chunked(
+    alpha: Union[np.ndarray, float, int, list],
+    beta: Union[np.ndarray, float, int, list],
+    chunk_size: int = 1000,
+) -> np.ndarray:
+    r"""
+    Optimized circular mean deviation with chunking.
+
+    $$
+    \delta = \pi - \frac{1}{n} \sum^{n}_{1}\left| \pi - \left| \alpha - \beta \right| \right|
+    $$
+
+    Parameters
+    ----------
+    alpha : array-like
+        Data in radians.
+    beta : array-like
+        Reference angles in radians.
+    chunk_size : int
+        Number of rows to process in chunks (must be positive).
+
+    Returns
+    -------
+    np.ndarray
+        Circular mean deviation.
+    """
+
+    if chunk_size <= 0:
+        raise ValueError("`chunk_size` must be a positive integer.")
+
+    alpha_arr = np.atleast_1d(np.asarray(alpha, dtype=float))
+    beta_arr = np.atleast_1d(np.asarray(beta, dtype=float))
+
+    result = np.empty(beta_arr.size, dtype=float)
+
+    for start in range(0, beta_arr.size, chunk_size):
+        stop = start + chunk_size
+        beta_chunk = beta_arr[start:stop]
+        angdist = np.pi - np.abs(np.pi - np.abs(alpha_arr - beta_chunk[:, None]))
+        chunk_mean = np.round(np.mean(angdist, axis=1), _ANGLE_DECIMALS)
+        result[start : start + beta_chunk.size] = chunk_mean
+
+    return result
+
+
+# Backwards compatibility: original misspelled export. Deprecated.
+def circ_mean_deviation_chuncked(
+    alpha: Union[np.ndarray, float, int, list],
+    beta: Union[np.ndarray, float, int, list],
+    chunk_size: int = 1000,
+) -> np.ndarray:
+    warnings.warn(
+        "`circ_mean_deviation_chuncked` is a misspelled alias and will be "
+        "removed in a future release; use `circ_mean_deviation_chunked` "
+        "instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return circ_mean_deviation_chunked(alpha, beta, chunk_size)
+
+
+def circ_mean_deviation(
+    alpha: Union[np.ndarray, float, int, list],
+    beta: Union[np.ndarray, float, int, list],
+) -> np.ndarray:
+    r"""
+    Circular mean deviation.
+
+    $$
+    \delta = \pi - \frac{1}{n} \sum^{n}_{1}\left| \pi - \left| \alpha - \beta \right| \right|
+    $$
+
+    It is the mean angular distance from one data point to all others.
+    The circular median of a set of data should be the point with minimal
+    circular mean deviation.
+
+    Parameters
+    ---------
+    alpha: np.array, int or float
+        Data in radian.
+    beta: np.array, int or float
+        reference angle in radian.
+
+    Returns
+    -------
+    circular mean deviation: np.array
+
+    Note
+    ----
+    eq 2.32, Section 2.3.2, Fisher (1993)
+    """
+    alpha_arr = np.atleast_1d(np.asarray(alpha, dtype=float))
+    beta_arr = np.atleast_1d(np.asarray(beta, dtype=float))
+
+    mean_dist = np.mean(
+        np.abs(np.pi - np.abs(alpha_arr - beta_arr[:, None])),
+        axis=1,
+    )
+    return np.round(np.pi - mean_dist, _ANGLE_DECIMALS)
+
+
+def circ_mean_ci(
+    alpha: Optional[np.ndarray] = None,
+    w: Optional[np.ndarray] = None,
+    mean: Optional[float] = None,
+    r: Optional[float] = None,
+    n: Union[int, None] = None,
+    ci: float = 0.95,
+    method: str = "approximate",
+    B: int = 2000,  # number of samples for bootstrap
+    seed: Optional[Union[int, np.random.Generator]] = None,
+    interval: str = "hdi",
+) -> tuple[float, float]:
+    r"""
+    Confidence interval of circular mean.
+
+    There are three methods to compute the confidence interval of circular mean:
+
+    - `approximate`: for n > 8
+    - `bootstrap`: for 8 < n < 25
+    - `dispersion`: for n >= 25
+
+    ### Approximate Method
+
+    For n as small as 8, and r $\le$ 0.9, r $>$ $\sqrt{\chi^{2}_{\alpha, 1}/2n}$, the confidence interval can be approximated by:
+
+    $$
+    \delta = \arccos\left(\sqrt{\frac{2n(2R^{2} - n\chi^{2}_{\alpha, 1})}{4n - \chi^{2}_{\alpha, 1}}} /R \right)
+    $$
+
+    For r $\ge$ 0.9,
+
+    $$
+    \delta = \arccos \left(\sqrt{n^2 - (n^2 - R^2)e^{\chi^2_{\alpha, 1}/n} } /R \right)
+    $$
+
+    ### Bootstrap Method
+
+    For 8 $<$ n $<$ 25, the confidence interval can be computed by bootstrapping the data.
+
+    ### Dispersion Method
+
+    For n $\ge$ 25, the confidence interval can be computed by the circular dispersion:
+
+    $$ \hat\sigma = \hat\delta / n$$
+
+    where $\hat\delta$ is the sample circular dispersion (see `circ_dispersion`). The confidence interval is then:
+
+    $$(\hat\mu - \sin^-1(z_{\frac{1}{2}\alpha}\hat\sigma),\space \hat\mu + \sin^-1(z_{\frac{1}{2}\alpha} \hat\sigma))$$
+
+    Parameters
+    ----------
+    alpha: np.array (n, )
+        Angles in radian.
+    w: np.array (n,) or None
+        Frequencies or weights
+    mean: float or None
+        Precomputed circular mean.
+    r: float or None
+        Precomputed resultant vector length.
+    n: int or None
+        Sample size.
+    ci: float
+        Confidence interval (default is 0.95).
+    method: str
+        - approximate: for n > 8
+        - bootstrap: for n < 25
+        - dispersion: for n >= 25
+    B: int
+        Number of samples for bootstrap.
+    seed: int, ``np.random.Generator``, or None
+        Seed/Generator for reproducible bootstrap. Only used when
+        ``method="bootstrap"``.
+    interval: str
+        How to summarise the bootstrap distribution into an interval. Only
+        used when ``method="bootstrap"``.
+
+        - ``"hdi"`` (default): Highest Density Interval — the shortest arc
+          containing ``ci`` of the bootstrap mass. Handles wrap-around
+          gracefully and is tighter for skewed bootstrap distributions.
+        - ``"percentile"``: Fisher (1993) §8.3.2 Stage 4 Technique 1 —
+          equal-tailed percentiles of the pivotal ``γ_b = μ̂*_b − θ̄``.
+          Matches the published bootstrap intervals in Fisher's tables.
+
+    Returns
+    -------
+    lower_bound: float
+        Lower bound of the confidence interval.
+    upper_bound: float
+        Upper bound of the confidence
+
+    References
+    ----------
+    - Section 26.7, Zar (2010)
+    - Section 4.4.4a/b, Fisher (1993)
+    """
+
+
+
+    if method not in ("approximate", "bootstrap", "dispersion"):
+        raise ValueError(
+            f"Method `{method}` for `circ_mean_ci` is not supported.\n"
+            "Try `dispersion`, `approximate` or `bootstrap`."
+        )
+    if method in ("bootstrap", "dispersion") and alpha is None:
+        raise ValueError(
+            f"`alpha` is required for `circ_mean_ci(method={method!r})`."
+        )
+
+    #  n > 8, according to Ch 26.7 (Zar, 2010)
+    if method == "approximate":
+        (lb, ub) = _circ_mean_ci_approximate(
+            alpha=alpha, w=w, mean=mean, r=r, n=n, ci=ci
+        )
+
+    # n < 25, according to 4.4.4a (Fisher, 1993, P75)
+    elif method == "bootstrap":
+        (lb, ub) = _circ_mean_ci_bootstrap(
+            alpha=alpha, B=B, ci=ci, seed=seed, interval=interval,
+        )
+
+    # n >= 25, according to 4.4.4b (Fisher, 1993, P75)
+    else:  # method == "dispersion"
+        (lb, ub) = _circ_mean_ci_dispersion(alpha=alpha, w=w, mean=mean, ci=ci)
+
+    return float(angmod(lb)), float(angmod(ub))
+
+
+def _circ_mean_ci_dispersion(
+    alpha: np.ndarray,
+    w: Optional[np.ndarray] = None,
+    mean: Optional[float] = None,
+    ci: float = 0.95,
+) -> tuple[float, float]:
+    r"""Confidence intervals based on circular dispersion.
+
+    Parameters
+    ----------
+    alpha: np.array (n, )
+        Angles in radian.
+    w: np.array (n,) or None
+        Frequencies or weights
+    mean: float or None
+        Precomputed circular mean.
+    ci: float
+        Confidence interval (default is 0.95).
+
+
+    Returns
+    -------
+    lower_bound: float
+        Lower bound of the confidence interval.
+    upper_bound: float
+        Upper bound of the confidence interval.
+
+
+    Note
+    ----
+    Implementation of Section 4.4.4b (Fisher, 1993)
+    """
+
+    if w is None:
+        w = np.ones_like(alpha)
+
+    if mean is None:
+        mean = circ_mean(alpha, w)
+
+    n = np.sum(w)
+    if n < 25:
+        raise ValueError(
+            f"n={n} is too small (< 25) for computing CI with circular dispersion."
+        )
+
+    delta = circ_dispersion(alpha=alpha, w=w)
+    z = norm.ppf(1 - 0.5 * (1 - ci))
+    inner = np.sqrt(delta / n) * z
+
+    if inner >= 1:
+        raise ValueError(
+            "Data are too dispersed, likely close to uniform.  CI undefined."
+        )
+
+    d = np.arcsin(
+        inner
+    )
+    lb = mean - d
+    ub = mean + d
+
+    if not is_within_circular_range(mean, lb, ub):
+        lb, ub = ub, lb
+
+    return (lb, ub)
+
+
+def _circ_mean_ci_approximate(
+    alpha: Optional[np.ndarray] = None,
+    w: Optional[np.ndarray] = None,
+    mean: Optional[float] = None,
+    r: Optional[float] = None,
+    n: Union[int, None] = None,
+    ci: float = 0.95,
+) -> tuple[float, float]:
+    r"""
+    Confidence Interval of circular mean.
+
+    $$
+    \displaylines{
+    \delta = \arccos\left(\sqrt{\frac{2n(2R^{2} - n\chi^{2}_{alpha, 1})}{4n - \chi^{2}_{\alpha, 1}}}\right)/R \cr
+    }
+    $$
+
+    Parameters
+    ----------
+    alpha: np.array (n, )
+        Angles in radian.
+    w: np.array (n,) or None
+        Frequencies or weights
+    mean: float or None
+        Precomputed circular mean.
+    r: float or None
+        Precomputed resultant vector length.
+    n: int or None
+        Sample size.
+    ci: float
+        Confidence interval (default is 0.95).
+
+    Returns
+    -------
+    lower_bound: float
+        Lower bound of the confidence interval.
+    upper_bound: float
+        Upper bound of the confidence interval.
+
+    Note
+    ----
+    Implementation of Example 26.6 (Zar, 2010)
+    """
+
+    if mean is None or r is None:
+        if alpha is None:
+            raise ValueError("If `r` is None, then `alpha` is required to compute it.")
+        if w is None:
+            w = np.ones_like(alpha)
+        n = np.sum(w)
+        mean, r = circ_mean_and_r(alpha, w)
+
+    if n is None:
+        raise ValueError("Sample size `n` is missing.")
+
+    if not (8 <= n):
+        raise ValueError("n must be ≥ 8 for the approximation (Zar 26.6).")
+
+    R = n * r
+    chi2_critical = chi2.isf(1 - ci, 1)
+    r_min = np.sqrt(chi2_critical / (2 * n))
+
+    if r < r_min:
+        raise ValueError(
+            f"Resultant length r={r:.4g} is too small for the "
+            f"approximate CI (must be > {r_min:.4g}). "
+            "Switch to the bootstrap (8 ≤ n < 25) or dispersion (n ≥ 25) method."
+        )
+
+    if r <= 0.9:  # eq(26.24)
+        inner = (
+            np.sqrt(
+                (2 * n * (2 * R**2 - n * chi2_critical))
+                / (4 * n - chi2_critical)
+            )
+            / R
+        )
+    else:  # eq(26.25)
+        inner = np.sqrt(n**2 - (n**2 - R**2) * np.exp(chi2_critical / n)) / R
+
+    d = np.arccos(inner)
+    
+    lb = float(mean - d)
+    ub = float(mean + d)
+
+    if not is_within_circular_range(mean, lb, ub):
+        lb, ub = ub, lb
+
+    return (lb, ub)
+
+
+def _circ_mean_ci_bootstrap(
+    alpha: np.ndarray,
+    B: int = 2000,
+    ci: float = 0.95,
+    seed: Optional[Union[int, np.random.Generator]] = None,
+    interval: str = "hdi",
+) -> tuple[float, float]:
+    """Implementation of Section 8.3 (Fisher, 1993, p.207)."""
+
+    if B <= 0:
+        raise ValueError("`B` must be a positive integer.")
+    if interval not in ("hdi", "percentile"):
+        raise ValueError(
+            f"Unknown bootstrap `interval={interval!r}`; expected "
+            "'hdi' or 'percentile'."
+        )
+
+    rng = seed if isinstance(seed, np.random.Generator) else np.random.default_rng(seed)
+
+    alpha_arr = np.atleast_1d(np.asarray(alpha, dtype=float))
+    if alpha_arr.ndim != 1 or alpha_arr.size == 0:
+        raise ValueError("`alpha` must be a one-dimensional array with at least one element.")
+
+    # Sanity-check: is a mean direction identifiable?
+    n = alpha_arr.size
+    r = circ_r(alpha_arr)
+
+    # Classic Rayleigh test approximation, avoids import cycles
+    z_stat = n * r**2  # Rayleigh's Z
+    p_val = np.exp(-z_stat)  # p ≈ e^(−Z) (valid for n ≥ 10)
+
+    if p_val > 0.05:  # Data look uniform ⇒ no identifiable mean direction
+        raise ValueError(
+            f"Bootstrap CI not computed: resultant length r={r:.4f} "
+            f"(Rayleigh p≈{p_val:.3f}) is too small. "
+            "Sample may be uniform, so the mean direction is undefined."
+        )
+
+    # Precompute z0 and v0 from original data (Algorithm 1 & 2)
+    cos_alpha = np.cos(alpha_arr)
+    sin_alpha = np.sin(alpha_arr)
+    z1 = np.mean(cos_alpha)  # eq (8.24)
+    z2 = np.mean(sin_alpha)
+    z0 = np.array([z1, z2], dtype=float)
+
+    u11 = np.mean((cos_alpha - z1) ** 2)  # eq (8.25)
+    u22 = np.mean((sin_alpha - z2) ** 2)
+    u12 = np.mean((cos_alpha - z1) * (sin_alpha - z2))  # eq (8.26)
+
+    if np.isclose(u12, 0.0):
+        beta_param = 0.0
+    else:
+        # Fisher (1993) eq (8.27): β = (u11-u22)/(2 u12) - sqrt((u11-u22)²/(4 u12²) + 1)
+        discriminant = (u11 - u22) ** 2 / (4 * u12**2) + 1
+        beta_param = (u11 - u22) / (2 * u12) - np.sqrt(discriminant)
+
+    denom = np.sqrt(1 + beta_param**2)
+    t1 = np.sqrt(np.clip(beta_param**2 * u11 + 2 * beta_param * u12 + u22, 0.0, None)) / denom
+    t2 = np.sqrt(np.clip(u11 - 2 * beta_param * u12 + beta_param**2 * u22, 0.0, None)) / denom
+    v11 = (beta_param**2 * t1 + t2) / (1 + beta_param**2)  # eq (8.30)
+    v22 = (t1 + beta_param**2 * t2) / (1 + beta_param**2)
+    v12 = v21 = beta_param * (t1 - t2) / (1 + beta_param**2)  # eq (8.31)
+    v0 = np.array([[v11, v12], [v21, v22]], dtype=float)
+
+    bootstrap_samples = np.asarray(
+        [_circ_mean_resample(alpha_arr, z0, v0, rng) for _ in range(B)],
+        dtype=float,
+    ).reshape(-1)
+
+    if interval == "hdi":
+        lb, ub = compute_hdi(bootstrap_samples, ci=ci)
+    else:  # interval == "percentile" — Fisher §8.3.2 Stage 4 Technique 1
+        # γ_b = μ̂*_b − θ̄ wrapped to (−π, π]; sort and take ranks (lo+1, m).
+        theta_bar = circ_mean(alpha_arr)
+        gamma = (bootstrap_samples - theta_bar + np.pi) % (2 * np.pi) - np.pi
+        gamma_sorted = np.sort(gamma)
+        lo = int(np.floor(0.5 * B * (1 - ci) + 0.5))  # Fisher's l, eq below 8.14
+        m = B - lo
+        # Fisher's eq (8.14) is (θ̄ + γ_(lo+1), θ̄ + γ_(m)) in 1-indexed notation.
+        lb = float(angmod(theta_bar + gamma_sorted[lo]))
+        ub = float(angmod(theta_bar + gamma_sorted[m - 1]))
+
+    mean_dir = circ_mean(bootstrap_samples)
+    if not is_within_circular_range(mean_dir, lb, ub):
+        lb, ub = ub, lb
+
+    return float(lb), float(ub)
+
+
+def _circ_mean_resample(
+    alpha: np.ndarray,
+    z0: np.ndarray,
+    v0: np.ndarray,
+    rng: np.random.Generator,
+) -> float:
+    """
+    Implementation of Section 8.3.5 (Fisher, 1993, P210)
+    """
+
+    alpha_arr = np.asarray(alpha, dtype=float)
+    theta_samples = rng.choice(alpha_arr, alpha_arr.size, replace=True)
+    cos_theta = np.cos(theta_samples)
+    sin_theta = np.sin(theta_samples)
+
+    # algo 1
+    z1 = np.mean(cos_theta)  # eq(8.24)
+    z2 = np.mean(sin_theta)
+    zB = np.array([z1, z2], dtype=float)
+
+    u11 = np.mean((cos_theta - z1) ** 2)  # eq(8.25)
+    u22 = np.mean((sin_theta - z2) ** 2)
+    u12 = np.mean((cos_theta - z1) * (sin_theta - z2))  # eq(8.26)
+
+    # algo 3
+    if np.isclose(u12, 0.0):
+        beta_param = 0.0
+    else:
+        # Fisher (1993) eq (8.32): same β as eq (8.27).
+        discriminant = (u11 - u22) ** 2 / (4 * u12**2) + 1
+        beta_param = (u11 - u22) / (2 * u12) - np.sqrt(discriminant)
+
+    denom = np.sqrt(1 + beta_param**2)
+    denom1 = np.sqrt(
+        np.clip(beta_param**2 * u11 + 2 * beta_param * u12 + u22, 1e-15, None)
+    )
+    denom2 = np.sqrt(
+        np.clip(u11 - 2 * beta_param * u12 + beta_param**2 * u22, 1e-15, None)
+    )
+    t1 = denom / denom1  # eq(8.33)
+    t2 = denom / denom2  # eq(8.34)
+    w11 = (beta_param**2 * t1 + t2) / (1 + beta_param**2)  # eq(8.35)
+    w22 = (t1 + beta_param**2 * t2) / (1 + beta_param**2)
+    w12 = w21 = beta_param * (t1 - t2) / (1 + beta_param**2)  # eq(8.36)
+
+    wB = np.array([[w11, w12], [w21, w22]])
+
+    Cbar_raw, Sbar_raw = z0 + v0 @ wB @ (zB - z0)
+    norm = np.hypot(Cbar_raw, Sbar_raw)
+    if np.isclose(norm, 0.0):
+        raise ValueError("Bootstrap resample produced zero-length resultant vector.")
+
+    Cbar = Cbar_raw / norm
+    Sbar = Sbar_raw / norm
+
+    m = np.arctan2(Sbar, Cbar)
+
+    return angmod(m)
+
+
+def circ_median_ci(
+    median: Optional[float] = None,
+    alpha: Optional[np.ndarray] = None,
+    w: Optional[np.ndarray] = None,
+    method: str = "deviation",
+    ci: float = 0.95,
+) -> tuple:
+    r"""Confidence interval for circular median
+
+    For n > 15, the confidence interval can be computed by:
+
+    $$
+    m = 1 + \text{integer part of} \frac{1}{2} n^{1/2} z_{\frac{1}{2}\alpha}
+    $$
+
+    For n $\le$ 15, the confidence interval can be selected from the table in Fisher (1993).
+
+    Parameters
+    ----------
+    median: float or None
+        Circular median.
+    alpha: np.array or None
+        Data in radian.
+    w: np.array or None
+        Frequencies or weights
+
+    Returns
+    -------
+    lower, upper, ci: tuple
+        confidence intervals and alpha-level. For ``n <= 2`` the bounds are
+        ``(nan, nan)`` since Fisher's table starts at ``n = 3``.
+
+    Note
+    ----
+    Implementation of section 4.4.2 (Fisher,1993)
+    """
+
+    if median is None:
+        if alpha is None:
+            raise ValueError("If `median` is None, then `alpha` is needed.")
+        if w is None:
+            w = np.ones_like(alpha)
+        median = float(circ_median(alpha=alpha, w=w, method=method, return_average=True))
+
+    if alpha is None:
+        raise ValueError(
+            "`alpha` is needed for computing the confidence interval for circular median."
+        )
+
+    n = len(alpha)
+    alpha = np.sort(alpha)
+
+    if n > 15:
+        z = norm.ppf(1 - 0.5 * (1 - ci))
+
+        offset = int(1 + np.floor(0.5 * np.sqrt(n) * z))  # fisher:eq(4.19)
+
+        arr = np.where(
+            alpha.round(_ANGLE_DECIMALS) < np.round(median, _ANGLE_DECIMALS)
+        )[0]
+        if len(arr) == 0:
+            # That means median is smaller than alpha[0] (to ANGLE_DECIMALS).
+            # In a circular sense, the “closest index below” is alpha[-1].
+            idx_median = len(alpha) - 1
+        else:
+            idx_median = arr[-1]
+
+        idx_lb = idx_median - offset + 1
+        idx_ub = idx_median + offset
+        if bool(np.any(np.isclose(alpha, median))):  # don't count the median per se
+            idx_ub += 1
+
+        idx_lb %= n
+        idx_ub %= n
+
+        lower, upper = alpha[int(idx_lb)], alpha[int(idx_ub)]
+
+        if not is_within_circular_range(median, lower, upper):
+            lower, upper = upper, lower
+
+    # selected confidence intervals for the median direction for n < 15
+    # from A6, Fisher, 1993.
+    # We only return the widest CI if there are more than one in the table.
+
+    elif n == 3:
+        lower, upper = alpha[0], alpha[2]
+        ci = 0.75
+    elif n == 4:
+        lower, upper = alpha[0], alpha[3]
+        ci = 0.875
+    elif n == 5:
+        lower, upper = alpha[0], alpha[4]
+        ci = 0.937
+    elif n == 6:
+        lower, upper = alpha[0], alpha[5]
+        ci = 0.97
+    elif n == 7:
+        lower, upper = alpha[0], alpha[6]
+        ci = 0.984
+    elif n == 8:
+        lower, upper = alpha[0], alpha[7]
+        ci = 0.992
+    elif n == 9:
+        lower, upper = alpha[0], alpha[8]
+        ci = 0.996
+    elif n == 10:
+        lower, upper = alpha[1], alpha[8]
+        ci = 0.978
+    elif n == 11:
+        lower, upper = alpha[1], alpha[9]
+        ci = 0.99
+    elif n == 12:
+        lower, upper = alpha[2], alpha[9]
+        ci = 0.962
+    elif n == 13:
+        lower, upper = alpha[2], alpha[10]
+        ci = 0.978
+    elif n == 14:
+        lower, upper = alpha[3], alpha[10]
+        ci = 0.937
+    elif n == 15:
+        lower, upper = alpha[2], alpha[12]
+        ci = 0.965
+    else:
+        lower, upper = np.nan, np.nan
+
+    return (angmod(lower), angmod(upper), ci)
+
+
+def circ_kappa(r: float, n: Union[int, None] = None) -> float:
+    r"""Estimate kappa by approximation.
+
+    $$
+    \hat\kappa_{ML} =
+    \begin{cases}
+     2r + r^3 + 5r^5/6, & \text{if } r < 0.53  \\
+     -0.4 + 1.39 r + 0.43 / (1 - r), & \text{if } 0.53 \le r < 0.85\\
+        1 / (r^3 - 4r^2 + 3r), & \text{if } r \ge 0.85
+    \end{cases}
+    $$
+
+    For $n \le 15$:
+
+    $$
+    \hat\kappa =
+    \begin{cases}
+        \max\left(\hat\kappa - \frac{2}{n\hat\kappa}, 0\right), & \text{if } \hat\kappa < 2 \\
+        \frac{(n - 1)^3 \hat\kappa}{n^3 + n}, & \text{if } \hat\kappa \ge 2
+    \end{cases}
+    $$
+
+
+    Parameters
+    ----------
+    r: float
+        Resultant vector length
+    n: int or None
+        Sample size. If n is not None, the adjustment for small sample size will be applied.
+
+    Returns
+    -------
+    kappa: float
+        Concentration parameter
+
+    Reference
+    ---------
+    Section 4.5.5 (P88, Fisher, 1993)
+    """
+
+    # eq 4.40
+    if r < 0.53:
+        kappa = 2 * r + r**3 + 5 * r**5 / 6
+    elif r < 0.85:
+        kappa = -0.4 + 1.39 * r + 0.43 / (1 - r)
+    else:
+        nom = r**3 - 4 * r**2 + 3 * r
+        if nom != 0:
+            kappa = 1 / nom
+        else:
+            # nom = r(r-1)(r-3); on the support r ∈ [0, 1] the only way to land
+            # here is r == 1, i.e. all observations coincident. The MLE then
+            # diverges (κ → ∞ as r → 1).
+            kappa = np.inf
+
+    # eq 4.41
+    if n is not None:
+        if n <= 15 and r < 0.7:
+            if kappa < 2:
+                kappa = np.max([kappa - 2 * 1 / (n * kappa), 0])
+            else:
+                kappa = (n - 1) ** 3 * kappa / (n**3 + n)
+
+    return kappa
+
+
+def circ_dist(
+    x: Union[np.ndarray, float],
+    y: Optional[Union[np.ndarray, float]] = None,
+    metric: str = "center",
+    return_sum: bool = False,
+) -> Union[np.ndarray, float]:
+    r"""
+    Compute the element-wise circular distance between two arrays of angles.
+
+    Parameters
+    ----------
+    x : array-like
+        First sample of circular data (radians).
+    y : array-like, optional
+        Second sample of circular data (radians). If None, computes element-wise
+        distances within `x` itself.
+    metric : str, optional
+        Distance metric to use, options:
+        - "center" (default): Standard circular difference wrapped to [-π, π].
+        - "geodesic": π - |π - |x - y||.
+        - "angularseparation": 1 - cos(x - y).
+        - "chord": sqrt(2 * (1 - cos(x - y))).
+    return_sum : bool, optional
+        If True, returns the sum of all computed distances (like R's `dist.circular()`).
+
+    Returns
+    -------
+    array
+        Element-wise distance values based on the chosen metric.
+    """
+    x = np.asarray(x)
+
+    if y is None:
+        y = x
+
+    y = np.asarray(y)
+
+    # Ensure broadcasting works without explicit shape checks
+    try:
+        np.broadcast_shapes(x.shape, y.shape)
+    except ValueError:
+        raise ValueError(
+            f"Shapes {x.shape} and {y.shape} are incompatible for broadcasting."
+        )
+
+    if metric == "center":
+        # Wrap (x - y) to (-π, π] without allocating two complex arrays.
+        distances = (x - y + np.pi) % (2 * np.pi) - np.pi
+
+    elif metric == "geodesic":
+        distances = np.pi - np.abs(np.pi - np.abs(x - y))
+
+    elif metric == "angularseparation":
+        distances = 1 - np.cos(x - y)
+
+    elif metric == "chord":
+        distances = np.sqrt(2 * (1 - np.cos(x - y)))
+
+    else:
+        raise ValueError(f"Unknown metric: {metric}")
+
+    return np.sum(distances).astype(float) if return_sum else distances
+
+
+def circ_pairdist(
+    x: np.ndarray,
+    y: Optional[np.ndarray] = None,
+    metric: str = "center",
+    return_sum: bool = False,
+) -> Union[np.ndarray, float]:
+    r"""
+    Compute the pairwise circular distance between all elements in `x` and `y`.
+
+    Parameters
+    ----------
+    x : array-like
+        First sample of circular data (radians).
+    y : array-like, optional
+        Second sample of circular data (radians). If None, computes pairwise
+        distances within `x` itself.
+    metric : str, optional
+        Distance metric to use (same options as `circ_dist`).
+    return_sum : bool, optional
+        If True, returns the sum of all computed distances (like R's `dist.circular()`).
+
+    Returns
+    -------
+    ndarray
+        Pairwise distance matrix where entry (i, j) is the circular distance
+        between x[i] and y[j] based on the chosen metric.
+    """
+    x = np.asarray(x)
+
+    # If y is not provided, compute pairwise distances within x
+    if y is None:
+        y = x
+
+    y = np.asarray(y)
+
+    # Reshape to allow broadcasting for pairwise computation
+    x_reshaped = x[:, None]  # Shape (n, 1)
+    y_reshaped = y[None, :]  # Shape (1, m)
+
+    return circ_dist(x_reshaped, y_reshaped, metric=metric, return_sum=return_sum)
+
+
+#########################
+# Convinience functions #
+#########################
+
+
+def convert_moment(
+    mp: complex,
+) -> Tuple[float, float]:
+    """
+    Convert complex moment to polar coordinates.
+
+    Parameters
+    ----------
+    mp: complex
+        Complex moment
+
+    Returns
+    -------
+    u: float
+        Angle in radian
+    r: float
+        Magnitude
+
+    """
+
+    u = float(angmod(float(np.angle(mp))))
+    r = np.abs(mp)
+
+    return u, r
+
+
+def compute_C_and_S(
+    alpha: np.ndarray,
+    w: np.ndarray,
+    p: int = 1,
+    mean: Union[float, np.ndarray] = 0.0,
+) -> Tuple[float, float]:
+    r"""
+    Compute the intermediate values Cbar and Sbar.
+
+    $$
+    \displaylines{
+    \bar{C}_{p} = \frac{\sum_{i=1}^{n} w_{i} \cos(p(\alpha_{i} - \mu))}{n} \\
+    \bar{S}_{p} = \frac{\sum_{i=1}^{n} w_{i} \sin(p(\alpha_{i} - \mu))}{n}
+    }
+    $$
+
+    Parameters
+    ----------
+    alpha: np.ndarray
+        Angles in radian.
+    w: np.ndarray
+        Frequencies or weights.
+    p: int, optional
+        Order of the moment (default is 1, for the first moment).
+    mean: float, optional
+        Mean angle (μ) to center the computation (default is 0.0).
+
+    Returns
+    -------
+    Cbar: float
+        Weighted mean cosine for the given moment.
+    Sbar: float
+        Weighted mean sine for the given moment.
+    """
+    n = np.sum(w)
+    Cbar = np.sum(w * np.cos(p * (alpha - mean))) / n
+    Sbar = np.sum(w * np.sin(p * (alpha - mean))) / n
+
+    return Cbar, Sbar
+
+
+def compute_hdi(samples: np.ndarray, ci: float = 0.95) -> tuple[float, float]:
+    """
+    Compute the Highest Density Interval (HDI) for circular data.
+
+    Parameters
+    ----------
+    samples : np.ndarray
+        Bootstrap samples of the circular mean in radians.
+    ci : float, optional
+        Credible interval (default is 0.95 for 95% HDI).
+
+    Returns
+    -------
+    hdi : tuple
+        Lower and upper bounds of the HDI in radians.
+    """
+    if not (0 < ci < 1):
+        raise ValueError("`ci` must be between 0 and 1 (exclusive).")
+
+    wrapped_samples = angmod(samples)
+    sorted_samples = np.sort(wrapped_samples)
+    n_samples = sorted_samples.size
+
+    if n_samples == 0:
+        raise ValueError("Insufficient data to compute HDI.")
+
+    window_size = max(1, int(np.floor(ci * n_samples)))
+    window_size = min(window_size, n_samples)
+
+    extended_samples = np.concatenate((sorted_samples, sorted_samples + 2 * np.pi))
+
+    best_width = np.inf
+    best_lower = float(sorted_samples[0])
+    best_upper = float(sorted_samples[0])
+
+    for start in range(n_samples):
+        stop = start + window_size - 1
+        upper = float(extended_samples[stop])
+        lower = float(sorted_samples[start])
+        width = upper - lower
+        if width < best_width:
+            best_width = width
+            best_lower, best_upper = lower, upper
+
+    return float(angmod(best_lower)), float(angmod(best_upper))
+
+
+def compute_smooth_params(r: float, n: int) -> float:
+    """
+    Parameters
+    ----------
+    r: float
+        resultant vector length
+    n: int
+        sample size
+
+    Returns
+    -------
+    h: float
+        smoothing parameter
+
+    Reference
+    ---------
+    Section 2.2 (P26, Fisher, 1993)
+    """
+
+    kappa = circ_kappa(r, n)
+    zeta = 1 / np.sqrt(kappa)  # eq 2.3
+    h = np.sqrt(7) * zeta / np.power(n, 0.2)  # eq 2.4
+
+    return h
+
+
+def nonparametric_density_estimation(
+    alpha: np.ndarray,  # angles in radian
+    h: float,  # smoothing parameters
+    radius: float = 1,  # radius of the plotted circle
+    n_grid: int = 100,
+) -> tuple:
+    """Nonparametric density estimates with
+    a quartic kernel function.
+
+    Parameters
+    ----------
+    alpha: np.ndarray (n, )
+        Angles in radian
+    h: float
+        Smoothing parameters
+    radius: float
+        radius of the plotted circle
+    n_grid: int
+        Number of grid points on ``[0, 2π]`` at which the density is
+        evaluated (default 100).
+
+    Returns
+    -------
+    x: np.ndarray (n_grid, )
+        grid
+    f: np.ndarray (n_grid, )
+        density
+
+    Reference
+    ---------
+    Section 2.2 (P26, Fisher, 1993)
+    """
+
+    # vectorized version of step 3
+    a = np.asarray(alpha, dtype=float)
+    n = len(a)
+    x = np.linspace(0, 2 * np.pi, n_grid)
+    d = np.abs(x[:, None] - a)
+    e = np.minimum(d, 2 * np.pi - d)
+    e = np.minimum(e, h)
+    weight_sum = np.sum((1 - e**2 / h**2) ** 2, axis=1)
+    f = 0.9375 * weight_sum / (n * h)
+
+    f = radius * np.sqrt(1 + np.pi * f) - radius
+
+    return x, f
+
+
+def circ_range(alpha: np.ndarray) -> np.float64:
+    """
+    Compute the circular range of angular data.
+
+    The circular range is ``2π`` minus the largest gap between consecutive
+    sorted angles — equivalently, the angular extent of the smallest arc
+    containing every observation.
+
+    Parameters
+    ----------
+    alpha : np.ndarray
+        Angles in radians.
+
+    Returns
+    -------
+    float
+        Circular range in radians, in ``[0, 2π)``. **Lower values indicate
+        tighter clustering**; values near ``2π`` indicate near-uniform spread.
+
+    Reference
+    ---------
+    P162, Section 7.2.3 of Jammalamadaka, S. Rao and SenGupta, A. (2001)
+    """
+    alpha = np.sort(alpha % (2 * np.pi))  # Convert to [0, 2π) and sort
+    spacings = np.diff(alpha, prepend=alpha[-1] - 2 * np.pi)  # Compute spacings
+    return 2 * np.pi - np.max(spacings)  # Circular range
+
+
+def circ_quantile(
+    alpha: np.ndarray,
+    probs: Union[float, np.ndarray] = np.array([0, 0.25, 0.5, 0.75, 1.0]),
+    type: int = 7,
+) -> np.ndarray:
+    """
+    Compute quantiles for circular data.
+
+    This function computes quantiles for circular data by shifting the
+    data to be centered around the circular median, applying a linear quantile function,
+    and then shifting back.
+
+    Parameters
+    ----------
+    alpha : np.ndarray
+        Sample of circular data (radians).
+    probs : float or np.ndarray, optional
+        Probabilities at which to compute quantiles. Default is `[0, 0.25, 0.5, 0.75, 1.0]`.
+    type : int, optional
+        Quantile algorithm in the Hyndman & Fan (1996) sense, matching R's
+        ``quantile()`` types 1–9. Default ``7`` (linear interpolation, R's
+        default).
+
+    Returns
+    -------
+    np.ndarray
+        Circular quantiles.
+
+    References
+    ----------
+    - R's `quantile.circular` from the `circular` package.
+    - Fisher (1993), Section 2.3.2.
+    - Hyndman, R. J. & Fan, Y. (1996). Sample quantiles in statistical
+      packages. *American Statistician*, 50, 361–365.
+    """
+
+    # R quantile type → numpy method name. numpy supports all 9.
+    _NP_METHOD_BY_TYPE = {
+        1: "inverted_cdf",
+        2: "averaged_inverted_cdf",
+        3: "closest_observation",
+        4: "interpolated_inverted_cdf",
+        5: "hazen",
+        6: "weibull",
+        7: "linear",
+        8: "median_unbiased",
+        9: "normal_unbiased",
+    }
+    if type not in _NP_METHOD_BY_TYPE:
+        raise ValueError(
+            f"Unsupported quantile `type={type}`; expected an integer in 1–9."
+        )
+    np_method = _NP_METHOD_BY_TYPE[type]
+
+    # Convert to numpy array
+    alpha = np.asarray(alpha)
+    probs = np.atleast_1d(probs)
+
+    # Compute circular median
+    circular_median = circ_median(alpha)
+
+    # If the median is NaN (e.g., uniform data), return NaNs
+    if np.isnan(circular_median):
+        return np.full_like(probs, np.nan)
+
+    # Transform data relative to circular median
+    shifted_alpha = (alpha - circular_median) % (2 * np.pi)
+    shifted_alpha = np.where(
+        shifted_alpha > np.pi, shifted_alpha - 2 * np.pi, shifted_alpha
+    )
+
+    # Compute linear quantiles on transformed data
+    linear_quantiles = np.quantile(shifted_alpha, probs, method=np_method)
+
+    # Transform back to original circular space
+    circular_quantiles = (linear_quantiles + circular_median) % (2 * np.pi)
+
+    return circular_quantiles
